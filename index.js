@@ -33,12 +33,27 @@ function VerifyJWT(req, res, next) {
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@doctors-portal-cluster.tenaw.mongodb.net/myFirstDatabase?retryWrites=true&w=majority`;
 const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true, serverApi: ServerApiVersion.v1 });
+
+
 async function run() {
     try {
         await client.connect();
         const serviceCollection = client.db("doctors-portal").collection("services");
         const bookingCollection = client.db("doctors-portal").collection("booking");
         const userCollection = client.db("doctors-portal").collection("users");
+        const doctorCollection = client.db("doctors-portal").collection("doctors");
+
+
+        const verifyAdmin = async (req, res, next) => {
+            const requester = req.decoded.email;
+            const requesterAccount = await userCollection.findOne({ email: requester });
+            if (requesterAccount.role === 'admin') {
+                next();
+            }
+            else {
+                res.status(403).send({ message: 'Forbidden' });
+            }
+        }
 
 
         // insert user //
@@ -54,21 +69,14 @@ async function run() {
         })
 
         // Make Admin //
-        app.put('/user/admin/:email', VerifyJWT, async (req, res) => {
+        app.put('/user/admin/:email', VerifyJWT, verifyAdmin, async (req, res) => {
             const email = req.params.email;
-            const requester = req.decoded.email;
-            const requesterAccount = await userCollection.findOne({ email: requester });
-            if (requesterAccount.role === 'admin') {
-                const filter = { email: email };
-                const updateDoc = {
-                    $set: { role: 'admin' }
-                };
-                const result = await userCollection.updateOne(filter, updateDoc);
-                res.send(result);
-            }
-            else {
-                res.status(403).send({ message: 'Forbidden' });
-            }
+            const filter = { email: email };
+            const updateDoc = {
+                $set: { role: 'admin' }
+            };
+            const result = await userCollection.updateOne(filter, updateDoc);
+            res.send(result);
         })
 
 
@@ -90,7 +98,7 @@ async function run() {
         // get all services from database //
         app.get('/service', async (req, res) => {
             const query = {};
-            const cursor = serviceCollection.find(query);
+            const cursor = serviceCollection.find(query).project({ name: 1 });
             const service = await cursor.toArray();
             res.send(service);
         })
@@ -139,7 +147,30 @@ async function run() {
             else {
                 return res.status(403).send({ message: 'Forbidden Access' })
             }
+        });
+
+
+        // Add Doctor to the database //
+        app.post('/doctor', VerifyJWT, verifyAdmin, async (req, res) => {
+            const doctor = req.body;
+            const result = await doctorCollection.insertOne(doctor);
+            res.send(result);
         })
+
+        // Get All Doctors //
+        app.get('/doctor', VerifyJWT, verifyAdmin, async (req, res) => {
+            const doctors = await doctorCollection.find().toArray();
+            res.send(doctors);
+        })
+
+        // Delete a doctor //
+        app.delete('/doctor/:email', VerifyJWT, verifyAdmin, async (req, res) => {
+            const email = req.params.email;
+            const filter = { doctorMail: email };
+            const doctor = await doctorCollection.deleteOne(filter);
+            res.send(doctor);
+        })
+
 
     }
     finally {
