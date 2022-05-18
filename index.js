@@ -4,7 +4,10 @@ const jwt = require('jsonwebtoken');
 const app = express()
 const port = process.env.PORT || 5000
 require('dotenv').config()
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
+// const nodemailer = require('nodemailer');
+// const { createTransport } = require('nodemailer');
 
 app.use(cors());
 app.use(express.json());
@@ -42,6 +45,7 @@ async function run() {
         const bookingCollection = client.db("doctors-portal").collection("booking");
         const userCollection = client.db("doctors-portal").collection("users");
         const doctorCollection = client.db("doctors-portal").collection("doctors");
+        const paymentCollection = client.db("doctors-portal").collection("payments");
 
 
         const verifyAdmin = async (req, res, next) => {
@@ -54,6 +58,18 @@ async function run() {
                 res.status(403).send({ message: 'Forbidden' });
             }
         }
+
+        app.post('/create-payment-intent', VerifyJWT, async (req, res) => {
+            const service = req.body;
+            const price = service.treatmentPrice;
+            const amount = price * 100;
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: amount,
+                currency: "usd",
+                payment_method_types: ['card']
+            });
+            res.send({ clientSecret: paymentIntent.client_secret })
+        })
 
 
         // insert user //
@@ -124,6 +140,7 @@ async function run() {
         // post booking data & filter by date //
         app.post('/booking', async (req, res) => {
             const info = req.body;
+            const email = info?.email;
             const query = { email: info?.email, treatmentName: info?.treatmentName, date: info?.date };
             const exists = await bookingCollection.findOne(query);
             if (exists) {
@@ -131,6 +148,32 @@ async function run() {
             }
             else {
                 const result = await bookingCollection.insertOne(info);
+                // step 1
+                /* let transporter = await createTransport({
+                    service: 'gmail',
+                    auth: {
+                        user: 'papererkotha69@gmail.com',
+                        password: 'wmuqondnizjcqtbj'
+                    }
+                });
+                console.log(transporter);
+
+                // step 2
+                let mailOptions = {
+                    from: 'papererkotha69@gmail.com',
+                    to: 'mstsalmabegum450@gmail.com',
+                    subject: 'Testing',
+                    text: 'Hello'
+                }
+                console.log(mailOptions);
+                // step 3
+                transporter.sendMail(mailOptions, function (err, data) {
+                    if (err) {
+                        console.log('Error detect.')
+                    } else {
+                        console.log('successfully send.')
+                    }
+                }) */
                 return res.send({ success: true, booking: result })
             }
         })
@@ -148,6 +191,32 @@ async function run() {
                 return res.status(403).send({ message: 'Forbidden Access' })
             }
         });
+
+
+        // get a single service for payment //
+        app.get('/booking/:id', VerifyJWT, async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: ObjectId(id) };
+            const result = await bookingCollection.findOne(query);
+            res.send(result);
+        })
+
+
+        // Update booking //
+        app.patch('/booking/:id', VerifyJWT, async (req, res) => {
+            const id = req.params.id;
+            const payment = req.body;
+            const filter = { _id: ObjectId(id) };
+            const updatedDoc = {
+                $set: {
+                    paid: true,
+                    transactionId: payment.transactionId,
+                }
+            }
+            const result = await paymentCollection.insertOne(payment)
+            const updateBooking = await bookingCollection.updateOne(filter, updatedDoc);
+            res.send(updatedDoc);
+        })
 
 
         // Add Doctor to the database //
@@ -185,3 +254,7 @@ run().catch(console.dir);
 app.listen(port, () => {
     console.log(`Running in http://localhost:${port}`)
 })
+
+
+
+// kiachejibonemehedivaikiachejibonemehedivai
